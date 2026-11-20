@@ -51,6 +51,20 @@ cd shooting
 浏览器打开 **http://127.0.0.1:4780**。第一次编译要几分钟。
 
 <details>
+<summary>开机自启、常驻后台（macOS）</summary>
+
+```bash
+./scripts/service-macos.sh install     # 登录后自动启动，崩溃后自动重启
+./scripts/service-macos.sh status      # 查看状态
+./scripts/service-macos.sh logs        # 查看日志
+./scripts/service-macos.sh uninstall   # 卸载
+```
+
+常驻的只有控制台。服务重启后监控保持关闭，需要你在页面上手动启动，避免意外进入实盘。内存占用实测：控制台约 60 MB，监控运行时另加约 15 MB，CPU 低于 1%。
+
+</details>
+
+<details>
 <summary>手动安装（不用脚本）</summary>
 
 ```bash

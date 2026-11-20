@@ -121,13 +121,20 @@ function probeOf(p) {
 let daemon = null; const logs = [];
 function startDaemon() {
   if (daemon) return;
-  daemon = spawn(BIN, ['--config', F.toml, 'run'], { env: { ...process.env, RUST_LOG: 'info' } });
+  // detached: false keeps it in our process group, so launchd stopping the console also stops it.
+  daemon = spawn(BIN, ['--config', F.toml, 'run'], { env: { ...process.env, RUST_LOG: 'info' }, detached: false });
   const push = (buf) => buf.toString().split('\n').filter(Boolean).forEach((l) => { logs.push(l); if (logs.length > 300) logs.shift(); });
   daemon.stdout.on('data', push); daemon.stderr.on('data', push);
   daemon.on('exit', (code) => { logs.push(JSON.stringify({ level: 'INFO', fields: { message: `守护进程已退出 (${code})` } })); daemon = null; });
 }
 function stopDaemon() { if (daemon) daemon.kill('SIGINT'); }
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { stopDaemon(); process.exit(0); }); // never leave a live daemon behind
+// Never leave a live daemon behind: give it a moment to exit cleanly on SIGINT, then force it.
+function shutdown() {
+  if (!daemon) process.exit(0);
+  const d = daemon; d.once('exit', () => process.exit(0)); stopDaemon();
+  setTimeout(() => { try { d.kill('SIGKILL'); } catch {} process.exit(0); }, 8000).unref();
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, shutdown);
 
 // ---------------------------------------------------------------- api
 const api = {
