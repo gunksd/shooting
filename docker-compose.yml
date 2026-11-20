@@ -1,0 +1,9 @@
+services:
+  shooter:
+    build: .
+    restart: "no"          # 不自动重启：重启会重新进入监控，实盘前请人工确认
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./data:/app/data
+    env_file: .env
+    stop_signal: SIGINT

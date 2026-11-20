@@ -1,0 +1,67 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Build and test
+        working-directory: contracts
+        run: forge test
+      - name: Committed artifact matches source
+        # The trailing CBOR metadata embeds hashes of the source files, so it may differ between
+        # machines (line endings, compiler build). The executable code itself must match exactly.
+        run: |
+          forge --version
+          python3 - <<'PY'
+          import json
+          def code(path):
+              h = json.load(open(path))["bytecode"]["object"][2:]
+              meta = int(h[-4:], 16)
+              return h[: -(meta + 2) * 2], h
+          built, built_full = code("contracts/out/SellExecutor.sol/SellExecutor.json")
+          committed, committed_full = code("contracts/artifacts/SellExecutor.json")
+          print("full bytecode identical:", built_full == committed_full)
+          assert built == committed, "contracts/artifacts/SellExecutor.json is stale: rebuild and commit it"
+          PY
+
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shooter
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts for the anvil end-to-end tests
+        working-directory: contracts
+        run: forge build
+      - name: Format and lint
+        working-directory: shooter
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        working-directory: shooter
+        run: cargo test --locked
+
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check console/server.mjs

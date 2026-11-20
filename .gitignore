@@ -1,0 +1,14 @@
+target/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+data/
+*.key
+.env
+config.toml
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+.DS_Store
+.playwright-mcp/

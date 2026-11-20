@@ -1,0 +1,52 @@
+# 复制为 config.toml 后修改。控制台（console/）会自动生成 data/shooter.toml，手工部署才需要本文件。
+dry_run = true                 # 默认模拟运行：只签名并记录，不广播
+chain_id = 56
+db_path = "data/shooter.db"
+
+[rpc]
+http = ["https://bsc-rpc.publicnode.com"]
+ws = []                        # 可选，多个 WebSocket 源并行竞速
+pending_ws = []                # 可选，支持 newPendingTransactions(full) 的源；strict_same_block 必需
+timeout_ms = 1500
+backfill_blocks = 64
+
+[executor]
+key_file = "data/executor.key" # 权限必须为 0600；或改用 key_env = "SHOOTER_EXECUTOR_KEY"
+
+[budget]
+usd_micros = 500000            # 每个任务的执行预算：0.5 USDT
+price_max_age_s = 30
+min_price_micros = 100000000   # BNB 价格合理区间 100 ~ 5000 USDT，区间外拒绝启动
+max_price_micros = 5000000000
+buffer_bps = 500
+price_pair = "0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE"   # Pancake V2 WBNB/USDT
+price_stable = "0x55d398326f99059fF775485246999027B3197955"
+include_init_costs = false     # true 时把已登记的部署/授权/建任务费用计入任务预算
+
+[[channels]]
+name = "public"
+kind = "public"
+url = "https://bsc-rpc.publicnode.com"
+
+# [[channels]]                 # 私有通道示例，认证值从环境变量读取
+# name = "blockrazor"
+# kind = "blockrazor"
+# url = "https://rpc.blockrazor.builders"
+# auth_env = "BLOCKRAZOR_AUTH"
+
+# [[tasks]]
+# task_id = "0x…"              # 链上 createTask 返回的 taskId
+# executor_contract = "0x…"
+# owner = "0x…"                # Agent 钱包地址
+# token_in = "0x…"
+# token_out = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+# factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+# pair_init_code_hash = "0x00fb7f630766e6a796048ea87d01acd3068e8ff67d078148a3fa3f4a84f69bd5"
+# amount_in = "0x…"
+# min_out = "0x…"              # 不允许为 0，且不得低于链上底线
+# mode = "next_block_best_effort"   # 或 pre_armed_spray / strict_same_block
+# gas_limit = 300000
+# gas_price_wei = 100000000
+# channels = ["public"]
+# max_attempts = 2
+# window_blocks = 3

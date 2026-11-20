@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shooter 开盘卖出控制台</title>
+<style>
+:root{
+  --bg:#0c0f14; --panel:#12161d; --raise:#181d26; --line:rgba(226,232,245,.08); --line2:rgba(226,232,245,.16);
+  --text:#e6e9ef; --dim:#9aa3b2; --mute:#667085;
+  --accent:#f0b64a; --accent-ink:#1a1204; --accent-soft:rgba(240,182,74,.12);
+  --ok:#5fd39a; --ok-soft:rgba(95,211,154,.12); --bad:#f2777a; --bad-soft:rgba(242,119,122,.12);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",sans-serif;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased;letter-spacing:.01em}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:0}
+.dim{color:var(--dim)} .mute{color:var(--mute)}
+
+/* top bar */
+header{height:60px;display:flex;align-items:center;gap:20px;padding:0 28px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(12,15,20,.86);backdrop-filter:blur(12px);z-index:10}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;font-size:15px}
+.brand i{width:9px;height:9px;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
+.brand span{color:var(--mute);font-weight:400}
+.chips{margin-left:auto;display:flex;gap:8px;align-items:center}
+.chip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;border:1px solid var(--line);border-radius:99px;font-size:12px;color:var(--dim);white-space:nowrap}
+.chip b{color:var(--text);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--mute)}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)} .dot.bad{background:var(--bad)} .dot.live{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+button.chip{cursor:pointer;background:none} button.chip:hover{border-color:var(--line2);color:var(--text)}
+.chip.real{border-color:rgba(242,119,122,.4);color:var(--bad)}
+
+/* shell */
+main{display:grid;grid-template-columns:232px minmax(0,1fr) 340px;gap:36px;max-width:1320px;margin:0 auto;padding:36px 28px 80px}
+nav{position:sticky;top:96px;align-self:start}
+nav ol{list-style:none;padding:0;position:relative}
+nav li{display:flex;gap:12px;padding:9px 10px;border-radius:8px;cursor:pointer;color:var(--dim);position:relative}
+nav li:hover{background:var(--panel)}
+nav li[aria-current]{color:var(--text);background:var(--panel)}
+nav li .n{flex:none;width:22px;height:22px;border-radius:50%;border:1px solid var(--line2);display:grid;place-items:center;font:11px var(--mono);color:var(--mute)}
+nav li[aria-current] .n{border-color:var(--accent);color:var(--accent)}
+nav li.done .n{background:var(--ok-soft);border-color:transparent;color:var(--ok)}
+nav li.locked{opacity:.45;cursor:not-allowed}
+nav li small{display:block;font-size:12px;color:var(--mute);margin-top:1px}
+nav li:not(:last-child)::after{content:"";position:absolute;left:20.5px;top:35px;bottom:-5px;width:1px;background:var(--line)}
+
+h1{font-size:26px;font-weight:650;letter-spacing:-.025em;line-height:1.2}
+.lede{color:var(--dim);margin:8px 0 26px;max-width:56ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+.row{display:flex;align-items:center;gap:16px;padding:16px 18px}
+.row+.row{border-top:1px solid var(--line)}
+.row .grow{flex:1;min-width:0}
+.row h3{font-size:14px;font-weight:550}
+.row p{font-size:12.5px;color:var(--dim);margin-top:2px;overflow-wrap:anywhere}
+.ico{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--raise);color:var(--mute);font:12px var(--mono)}
+.ico.ok{background:var(--ok-soft);color:var(--ok)} .ico.bad{background:var(--bad-soft);color:var(--bad)} .ico.wait{background:var(--accent-soft);color:var(--accent)}
+
+.btn{height:36px;padding:0 15px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);cursor:pointer;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,transform .06s}
+.btn:hover{border-color:rgba(226,232,245,.3)} .btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.primary:hover{background:#f6c366}
+.btn.ghost{background:none;border-color:transparent;color:var(--dim)} .btn.ghost:hover{color:var(--text);background:var(--raise)}
+.btn.danger{color:var(--bad);border-color:rgba(242,119,122,.35);background:none}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn.busy{position:relative;color:transparent!important;pointer-events:none}
+.btn.busy::after{content:"";position:absolute;inset:0;margin:auto;width:14px;height:14px;border-radius:50%;border:2px solid var(--dim);border-top-color:transparent;animation:spin .7s linear infinite}
+.btn.primary.busy::after{border-color:var(--accent-ink);border-top-color:transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+.foot{display:flex;gap:10px;justify-content:flex-end;margin-top:22px}
+
+label{display:block;font-size:12.5px;font-weight:500;color:var(--dim);margin-bottom:7px}
+.field{margin-bottom:18px}
+.in{display:flex;align-items:center;height:44px;border:1px solid var(--line2);border-radius:8px;background:var(--bg);padding:0 12px;gap:8px;transition:border-color .12s,box-shadow .12s}
+.in:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.in input{flex:1;min-width:0;background:none;border:0;outline:0;height:100%;font-family:var(--mono);font-size:13.5px}
+.in input::placeholder{color:var(--mute);font-family:var(--sans)}
+.in .unit{color:var(--mute);font-size:12.5px}
+.in button{background:var(--raise);border:1px solid var(--line);border-radius:6px;height:26px;padding:0 9px;font-size:12px;color:var(--dim);cursor:pointer}
+.in button:hover{color:var(--text)}
+.hint{font-size:12.5px;color:var(--mute);margin-top:7px}
+.err{font-size:12.5px;color:var(--bad);margin-top:7px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg button{text-align:left;padding:14px 15px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel);cursor:pointer}
+.seg button:hover{border-color:var(--line2)}
+.seg button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.seg b{display:block;font-weight:600;margin-bottom:3px} .seg span{font-size:12.5px;color:var(--dim)}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:9px 18px;font-size:13px}
+.kv dt{color:var(--dim)} .kv dd{text-align:right;overflow-wrap:anywhere}
+.pad{padding:18px}
+.note{border-left:2px solid var(--accent);background:var(--accent-soft);padding:11px 14px;border-radius:0 8px 8px 0;font-size:12.5px;color:var(--text);margin-top:16px}
+.note.bad{border-color:var(--bad);background:var(--bad-soft)}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;font-size:12px;background:var(--raise);color:var(--dim)}
+.badge.ok{background:var(--ok-soft);color:var(--ok)} .badge.bad{background:var(--bad-soft);color:var(--bad)} .badge.live{background:var(--accent-soft);color:var(--accent)}
+
+aside{position:sticky;top:96px;align-self:start;display:grid;gap:16px}
+aside h2{font-size:12.5px;font-weight:600;color:var(--dim);margin-bottom:14px}
+.big{font:600 24px/1.1 var(--mono);letter-spacing:-.02em}
+.bar{height:4px;border-radius:2px;background:var(--raise);overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+.log{max-height:230px;overflow:auto;font:11.5px/1.6 var(--mono);color:var(--dim)}
+.log div{padding:2px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.log .WARN{color:var(--accent)} .log .ERROR{color:var(--bad)}
+.probes{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;margin-top:10px}
+.probes button{padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;text-align:left}
+.probes button:hover{border-color:var(--line2)}
+.probes button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.probes small{display:block;color:var(--mute);font-size:11px;margin-top:2px}
+.empty{padding:28px 18px;text-align:center;color:var(--mute);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-weight:500;color:var(--mute);text-align:left;padding:10px 18px;border-bottom:1px solid var(--line)}
+td{padding:10px 18px;border-bottom:1px solid var(--line)} tr:last-child td{border:0}
+td.r,th.r{text-align:right}
+
+dialog{border:1px solid var(--line2);border-radius:14px;background:var(--panel);color:var(--text);padding:26px;width:min(440px,92vw);margin:auto}
+dialog::backdrop{background:rgba(5,7,10,.7);backdrop-filter:blur(3px)}
+dialog h2{font-size:18px;letter-spacing:-.01em;margin-bottom:8px}
+#toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);background:var(--raise);border:1px solid var(--line2);padding:10px 16px;border-radius:9px;font-size:13px;opacity:0;transition:.2s;z-index:60;max-width:80vw}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+.fade{animation:fade .22s ease-out}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:1100px){main{grid-template-columns:1fr;gap:24px}nav,aside{position:static}nav ol{display:flex;overflow:auto;gap:6px}nav li::after{display:none}nav li small{display:none}.chips .hide-sm{display:none}}
+@media (max-width:560px){.grid2,.seg{grid-template-columns:1fr}header{padding:0 16px}main{padding:24px 16px 60px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>Shooter <span>开盘卖出控制台</span></div>
+  <div class="chips" id="chips"></div>
+</header>
+<main>
+  <nav aria-label="步骤"><ol id="steps"></ol></nav>
+  <section id="view" aria-live="polite"></section>
+  <aside id="side"></aside>
+</main>
+<dialog id="dlg"></dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
+const units = (v, d = 18, p = 6) => { v = BigInt(v || 0); const b = 10n ** BigInt(d); const i = v / b; let f = (v % b).toString().padStart(d, '0').slice(0, p).replace(/0+$/, ''); return i.toLocaleString('en-US') + (f ? '.' + f : ''); };
+const parse = (s, d = 18) => { s = String(s).trim().replace(/,/g, ''); if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') throw new Error('数字格式不正确'); const [i, f = ''] = s.split('.'); return BigInt(i || '0') * 10n ** BigInt(d) + BigInt((f + '0'.repeat(d)).slice(0, d) || '0'); };
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 3200); };
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json', 'x-console': '1' }, body: JSON.stringify(body) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || '请求失败'); return j;
+}
+async function busy(btn, fn) { btn.classList.add('busy'); btn.disabled = true; try { return await fn(); } catch (e) { toast(e.message); throw e; } finally { btn.classList.remove('busy'); btn.disabled = false; } }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const S = { step: 0, ov: null, token: null, form: { amount: '', cost: '', mult: '2', mode: 'pre_armed_spray', gwei: '0.05', gweiTouched: false, attempts: '', recipient: '', probeAddr: '', probeSel: '', probeMin: '' }, probes: null, plan: null, approve: null, create: null, status: null, pre: null };
+const STEPS = [['准备环境', '钱包、执行账户、合约'], ['选择代币', '输入合约地址并体检'], ['卖出参数', '数量、底线、模式'], ['钱包授权', '限额授权并创建任务'], ['监控执行', '预检、启动、结果']];
+
+const envReady = () => S.ov?.wallet && S.ov?.executor && S.ov?.contract?.deployed;
+const reach = () => [true, envReady(), !!S.token, !!S.plan, (S.ov?.tasks || []).length > 0];
+const capWei = () => S.ov?.bnbPrice ? BigInt(Math.floor((S.ov.settings.budgetUsd / S.ov.bnbPrice) * 0.95 * 1e18)) : 0n;
+
+function renderChrome() {
+  const o = S.ov || {}, r = reach();
+  const sig = JSON.stringify([o.wallet, o.head, o.bnbPrice, o.settings, S.step, r, S.token?.address, S.form, S.status?.tasks, S.status?.running]);
+  if (renderChrome.sig === sig) return; renderChrome.sig = sig;
+  $('#chips').innerHTML = `
+    <span class="chip"><i class="dot ${o.wallet ? 'ok' : 'bad'}"></i>钱包 <b class="num">${o.wallet ? short(o.wallet.address) : '未连接'}</b></span>
+    <span class="chip hide-sm">区块 <b class="num">${o.head ? o.head.toLocaleString('en-US') : '…'}</b></span>
+    <span class="chip hide-sm">BNB <b class="num">${o.bnbPrice ? '$' + o.bnbPrice.toFixed(2) : '…'}</b></span>
+    <button class="chip" id="cfg" title="RPC 与预算">设置</button>
+    <button class="chip ${o.settings?.dryRun === false ? 'real' : ''}" id="dry" title="切换模拟运行 / 实盘"><i class="dot ${o.settings?.dryRun === false ? 'bad' : 'live'}"></i>${o.settings?.dryRun === false ? '实盘' : '模拟运行'}</button>`;
+  $('#dry').onclick = toggleDry; $('#cfg').onclick = settingsDlg;
+  $('#steps').innerHTML = STEPS.map(([t, d], i) => `<li class="${i < S.step && r[i] ? 'done' : ''} ${r[i] ? '' : 'locked'}" ${i === S.step ? 'aria-current="step"' : ''} data-i="${i}" tabindex="${r[i] ? 0 : -1}"><span class="n">${i < S.step && r[i] ? '✓' : i + 1}</span><span>${t}<small>${d}</small></span></li>`).join('');
+  $('#steps').querySelectorAll('li').forEach((li) => { const go = () => { if (r[+li.dataset.i]) { S.step = +li.dataset.i; render(); } }; li.onclick = go; li.onkeydown = (e) => e.key === 'Enter' && go(); });
+  renderSide();
+}
+
+function renderSide() {
+  const o = S.ov || {}, t = S.token, f = S.form; let h = '';
+  if (t) {
+    let floor = '', amt = '';
+    try { amt = units(parse(f.amount || '0', t.decimals), t.decimals, 4); } catch {}
+    try { floor = units(parse(f.cost || '0') * BigInt(Math.round(Number(f.mult || 0) * 100)) / 100n, 18, 6); } catch {}
+    h += `<div class="card pad"><h2>任务摘要</h2><dl class="kv">
+      <dt>代币</dt><dd><b>${esc(t.symbol) || '未知'}</b> <span class="num mute">${short(t.address)}</span></dd>
+      <dt>卖出数量</dt><dd class="num">${amt || '0'}</dd>
+      <dt>最低到账</dt><dd class="num">${floor || '0'} BNB</dd>
+      <dt>模式</dt><dd>${f.mode === 'pre_armed_spray' ? '预埋同块' : '下一块卖出'}</dd>
+      ${f.mode === 'pre_armed_spray' ? `<dt>开始预埋</dt><dd>${f.probeAddr && f.probeSel && f.probeMin ? `进度达到 <span class="num">${esc(f.probeMin)}</span>` : '启动监控后立即'}</dd>` : ''}
+      <dt>收款地址</dt><dd class="num">${short(f.recipient || o.wallet?.address)}</dd></dl></div>`;
+  }
+  const st = S.status;
+  if (st && (st.tasks.length || st.running)) {
+    const k = st.tasks[st.tasks.length - 1];
+    const spent = BigInt(k?.spent_wei || 0), cap = BigInt(k?.cap_wei || 0);
+    h += `<div class="card pad"><h2>执行预算</h2><div class="big">${units(spent, 18, 6)} <span class="mute" style="font-size:13px;font-weight:400">/ ${cap ? units(cap, 18, 6) : '未固定'} BNB</span></div>
+      <div class="bar"><i style="width:${cap ? Math.min(100, Number(spent * 100n / cap)) : 0}%"></i></div>
+      <p class="hint">上限为 ${o.settings?.budgetUsd} USDT 等值 BNB，在任务首次启动时按当时价格固定。之后 BNB 价格变动会让美元价值偏离。</p></div>`;
+  }
+  h += `<div class="card pad"><h2>须知</h2><p class="dim" style="font-size:12.5px">同块或下一块成交是争取目标，排序由出块方决定。结果只以链上回执和实际到账为准。未达到最低到账时交易整体回滚，只损失 Gas。</p></div>`;
+  $('#side').innerHTML = h;
+}
+
+// ------------------------------------------------------------ step views
+const V = [];
+V[0] = () => {
+  const o = S.ov || {}, ex = o.executor, c = o.contract;
+  const exBal = ex ? BigInt(ex.balanceWei) : 0n, need = capWei() + 3000000n * 100000000n;
+  return `<h1>准备环境</h1><p class="lede">代币始终留在你的 Agent 钱包。独立执行账户只持有少量 BNB 用来付 Gas，它无权改动收款地址、数量上限和最低到账。</p>
+  <div class="card">
+    <div class="row"><div class="ico ${o.wallet ? 'ok' : 'bad'}">${o.wallet ? '✓' : '!'}</div><div class="grow"><h3>Binance Agentic Wallet</h3><p class="num">${o.wallet ? o.wallet.address : esc(o.errors?.wallet || '未检测到钱包，请先在终端完成 baw 登录')}</p></div></div>
+    <div class="row"><div class="ico ${ex ? (exBal >= need ? 'ok' : 'wait') : ''}">${ex ? (exBal >= need ? '✓' : '2') : '2'}</div><div class="grow"><h3>执行账户</h3>
+      <p>${ex ? `<span class="num">${ex.address}</span><br>余额 <span class="num">${units(exBal, 18, 6)}</span> BNB${exBal < need ? `，建议至少转入 <span class="num">${units(need, 18, 5)}</span> BNB（部署合约加一次任务的预算）` : ''}` : '在本机生成一个仅用于付 Gas 的新账户，私钥保存在 data/executor.key（权限 0600）。'}</p></div>
+      ${ex ? `${exBal > 0n ? '<button class="btn ghost" id="wd">取回 BNB</button>' : ''}<button class="btn ghost" data-copy="${ex.address}">复制地址</button>` : `<button class="btn primary" id="gen">生成账户</button>`}</div>
+    <div class="row"><div class="ico ${c?.deployed ? 'ok' : ''}">${c?.deployed ? '✓' : '3'}</div><div class="grow"><h3>执行合约</h3>
+      <p>${c ? `<span class="num">${c.address}</span>${c.deployed ? '' : '<br>该地址上还没有合约代码'}` : '不可升级、无管理员、无任意调用。由执行账户部署一次，之后所有任务复用。'}</p></div>
+      ${c?.deployed ? '' : `<button class="btn ghost" id="useC">已有合约</button><button class="btn primary" id="dep" ${ex && exBal > 0n ? '' : 'disabled'}>部署合约</button>`}</div>
+  </div>
+  ${ex ? '<div class="note">转入执行账户的 BNB 始终归你。点「取回 BNB」会把全部余额转回 Agent 钱包，只扣一笔约 0.000001 BNB 的转账费。私钥文件 data/executor.key 只保存在这台电脑上，删除它会让这部分 BNB 无法取回，所以账户里放够用的金额即可。</div>' : ''}
+  ${o.binary ? '' : '<div class="note bad">未找到 shooter 可执行文件。请在 shooter/ 目录执行 cargo build --release 后刷新。</div>'}
+  <div class="foot"><button class="btn primary" id="next" ${envReady() ? '' : 'disabled'}>下一步</button></div>`;
+};
+V[0].bind = () => {
+  $('#gen') && ($('#gen').onclick = (e) => busy(e.target, async () => { await api('/api/executor/generate', {}); await refresh(); }));
+  $('#wd') && ($('#wd').onclick = () => confirmDlg('取回 BNB', '把执行账户的全部 BNB（扣除一笔转账手续费）转回你的 Agent 钱包。取回后需要重新充值才能继续执行任务。', '确认取回', async () => { const r = await api('/api/executor/withdraw', {}); toast((r.confirmed ? '已到账 ' : '已发送，等待确认 ') + units(r.amount_wei, 18, 6) + ' BNB'); await refresh(); }));
+  $('#dep') && ($('#dep').onclick = () => confirmDlg('部署执行合约', '将由执行账户向 BSC 主网发送一笔部署交易，消耗该账户的少量 BNB。此操作不可撤销。', '确认部署', async () => { const r = await api('/api/deploy', {}); toast('已部署，花费 ' + units(r.cost_wei, 18, 6) + ' BNB'); await refresh(); }));
+  $('#useC') && ($('#useC').onclick = () => promptDlg('使用已部署的执行合约', '合约地址', async (v) => { await api('/api/contract/use', { address: v }); await refresh(); }));
+};
+
+V[1] = () => {
+  const t = S.token; let body = '';
+  if (t) {
+    const has = BigInt(t.balance) > 0n, pool = t.pool, liquid = pool && BigInt(pool.reserveBnb) > 0n;
+    body = `<div class="card" style="margin-top:18px">
+      <div class="row"><div class="ico ok">✓</div><div class="grow"><h3>${esc(t.symbol) || '未知符号'} <span class="mute" style="font-weight:400">${esc(t.name)}</span></h3><p>标准 ERC-20 接口可读，精度 ${t.decimals}</p></div></div>
+      <div class="row"><div class="ico ${has ? 'ok' : 'bad'}">${has ? '✓' : '!'}</div><div class="grow"><h3>钱包持仓</h3><p><span class="num">${units(t.balance, t.decimals, 4)}</span> ${esc(t.symbol)}${has ? '' : '。钱包里没有这个代币，无法创建卖出任务'}</p></div></div>
+      <div class="row"><div class="ico ${liquid ? 'wait' : 'ok'}">${liquid ? '!' : '✓'}</div><div class="grow"><h3>PancakeSwap V2 池子</h3><p>${liquid ? `已有流动性：<span class="num">${units(pool.reserveBnb, 18, 4)}</span> BNB。现在全部卖出约得 <span class="num">${units(pool.quoteAllWei, 18, 5)}</span> BNB（未计代币税）` : pool ? '池子已创建，尚未注入流动性' : '尚未建池。开盘时会在 WBNB 交易对上被自动识别'}</p></div></div>
+      <div class="row"><div class="ico">i</div><div class="grow"><h3>待验证项</h3><p>代币是否有转账税、黑名单或合约地址限制无法在开盘前从链上确定。执行合约默认只接受零损耗转账，遇到税币会回滚并保留任务。</p></div></div>
+    </div>`;
+  }
+  return `<h1>选择代币</h1><p class="lede">粘贴要在开盘时卖出的代币合约地址。只支持最终进入 PancakeSwap V2（WBNB 交易对）的代币。</p>
+  <div class="field"><label for="ta">代币合约地址</label><div class="in"><input id="ta" placeholder="0x…" spellcheck="false" autocomplete="off" value="${esc(t?.address || '')}"><button id="paste" type="button">粘贴</button></div><div id="te" class="err" hidden></div></div>
+  <button class="btn" id="chk">体检</button>${body}
+  <div class="foot"><button class="btn primary" id="next" ${t && BigInt(t.balance) > 0n ? '' : 'disabled'}>下一步</button></div>`;
+};
+V[1].bind = () => {
+  const check = (btn) => busy(btn, async () => {
+    $('#te').hidden = true;
+    try { S.token = await api('/api/token', { address: $('#ta').value.trim() }); S.plan = S.approve = S.create = null; S.form.amount = units(S.token.balance, S.token.decimals, S.token.decimals).replace(/,/g, ''); render(); }
+    catch (e) { $('#te').textContent = e.message; $('#te').hidden = false; }
+  }).catch(() => {});
+  $('#chk').onclick = (e) => check(e.target);
+  $('#ta').onkeydown = (e) => e.key === 'Enter' && check($('#chk'));
+  $('#paste').onclick = async () => { try { $('#ta').value = (await navigator.clipboard.readText()).trim(); check($('#chk')); } catch { toast('浏览器未授予剪贴板权限'); } };
+};
+
+function sprayMath() {
+  const c = S.ov.constants, gp = BigInt(Math.round(Number(S.form.gwei || 0) * 1e9)), cap = capWei();
+  const fail = BigInt(c.gasFail) * gp, full = BigInt(c.gasLimit) * gp;
+  const max = fail > 0n && cap > full ? Number((cap - full) / fail) : 0;
+  return { fail, full, max, cap };
+}
+V[2] = () => {
+  const t = S.token, f = S.form, m = sprayMath(), spray = f.mode === 'pre_armed_spray';
+  if (!f.attempts) f.attempts = String(Math.min(m.max, 60));
+  const n = Math.max(0, Math.min(Number(f.attempts) || 0, m.max));
+  return `<h1>卖出参数</h1><p class="lede">最低到账写入链上任务，执行账户只能把它调高。达不到就整笔回滚，不成交。</p>
+  <div class="grid2">
+    <div class="field"><label for="fa">卖出数量</label><div class="in"><input id="fa" inputmode="decimal" value="${esc(f.amount)}"><span class="unit">${esc(t.symbol)}</span><button id="all" type="button">全部</button></div><div class="hint">持仓 <span class="num">${units(t.balance, t.decimals, 4)}</span></div></div>
+    <div class="field"><label for="fc">这部分代币的成本</label><div class="in"><input id="fc" inputmode="decimal" placeholder="例如 0.03" value="${esc(f.cost)}"><span class="unit">BNB</span></div><div class="hint">用于计算最低到账，不会上链</div></div>
+  </div>
+  <div class="grid2">
+    <div class="field"><label for="fm">最低成交倍数</label><div class="in"><input id="fm" inputmode="decimal" value="${esc(f.mult)}"><span class="unit">× 成本</span></div><div class="hint" id="floor"></div></div>
+    <div class="field"><label for="fg">Gas 价格</label><div class="in"><input id="fg" inputmode="decimal" value="${esc(f.gwei)}"><span class="unit">gwei</span></div><div class="hint">${spray ? '预埋建议用最低价 0.05：失败成本最低。区块内通常按 Gas 价格从高到低排，低价更可能排在开盘交易之后（观察所得，出块方不保证）' : 'BSC 最低 0.05。价格越高，在下一块里通常越靠前'}</div></div>
+  </div>
+  <div class="field"><label>执行模式</label><div class="seg">
+    <button type="button" aria-pressed="${!spray}" data-mode="next_block_best_effort"><b>下一块卖出</b><span>看到开盘上链后立即发送，争取开盘后第 1 个区块成交。几乎不浪费 Gas。</span></button>
+    <button type="button" aria-pressed="${spray}" data-mode="pre_armed_spray"><b>预埋同块</b><span>启动后每个区块预埋一笔，开盘前的会低成本回滚，争取与开盘同块成交。</span></button></div></div>
+  ${spray ? `<div class="field"><label for="fn">最多预埋笔数</label><div class="in"><input id="fn" inputmode="numeric" value="${n}"><span class="unit">笔，每块 1 笔</span></div>
+    <div class="hint">每笔失败约 <span class="num">${units(m.fail, 18, 7)}</span> BNB。按当前预算最多 <span class="num">${m.max}</span> 笔，${n} 笔约覆盖 <span class="num">${(n * 0.45).toFixed(0)}</span> 秒。未设置自动条件时，请在开盘前一刻再启动监控。</div></div>
+  <div class="field"><label for="fp">自动预埋条件（可选）</label>
+    <div class="in"><input id="fp" placeholder="发射 / 销售合约地址" spellcheck="false" value="${esc(f.probeAddr)}"><button id="scan" type="button">读取进度</button></div>
+    <div class="hint">填写后可以提前启动监控：合约里的进度读数达到阈值才开始预埋。留空则启动监控后立即预埋。</div>
+    ${S.probes ? (S.probes.length ? `<div class="probes">${S.probes.map((c) => `<button type="button" data-sel="${c.selector}" aria-pressed="${f.probeSel === c.selector}"><span class="num">${Number(c.value).toLocaleString('en-US')}</span><small class="num">${c.selector}</small></button>`).join('')}</div>
+    <div class="in" style="margin-top:10px"><input id="fpm" inputmode="numeric" placeholder="达到多少时开始预埋，例如 7990" value="${esc(f.probeMin)}"><span class="unit">阈值</span></div>
+    <div class="hint">选中与发射页当前进度一致的读数，再填一个接近满额的阈值。</div>` : '<div class="err">没有在该合约上找到可用的进度读数</div>') : ''}
+  </div>` : ''}
+  <div class="field"><label for="fr">收款地址</label><div class="in"><input id="fr" placeholder="${esc(S.ov.wallet.address)}（默认：Agent 钱包）" spellcheck="false" value="${esc(f.recipient)}"></div><div class="hint">到账为 WBNB，创建任务后执行账户无法更改</div></div>
+  <div id="pe" class="err" hidden></div>
+  <div class="foot"><button class="btn ghost" id="back">上一步</button><button class="btn primary" id="plan">生成授权方案</button></div>`;
+};
+V[2].bind = () => {
+  const f = S.form, t = S.token;
+  const sync = () => { f.amount = $('#fa').value; f.cost = $('#fc').value; f.mult = $('#fm').value; f.gwei = $('#fg').value; f.recipient = $('#fr').value.trim(); if ($('#fn')) f.attempts = $('#fn').value; if ($('#fp')) f.probeAddr = $('#fp').value.trim(); if ($('#fpm')) f.probeMin = $('#fpm').value.trim();
+    try { const fl = parse(f.cost) * BigInt(Math.round(Number(f.mult) * 100)) / 100n; $('#floor').innerHTML = fl > 0n ? `最低到账 <span class="num">${units(fl, 18, 6)}</span> BNB` : '填写成本后计算'; } catch { $('#floor').textContent = '填写成本后计算'; }
+    renderSide(); };
+  ['fa', 'fc', 'fm', 'fg', 'fr', 'fn', 'fp', 'fpm'].forEach((id) => $('#' + id) && ($('#' + id).oninput = sync)); sync();
+  $('#fg').onchange = () => { f.gweiTouched = true; f.attempts = ''; render(); };
+  $('#scan') && ($('#scan').onclick = (e) => busy(e.target, async () => { sync(); S.probes = (await api('/api/probe/scan', { address: f.probeAddr })).candidates; f.probeSel = ''; render(); }).catch(() => {}));
+  document.querySelectorAll('[data-sel]').forEach((b) => (b.onclick = () => { sync(); f.probeSel = b.dataset.sel; render(); }));
+  $('#all').onclick = () => { $('#fa').value = units(t.balance, t.decimals, t.decimals).replace(/,/g, ''); sync(); };
+  document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { sync(); f.mode = b.dataset.mode; if (!f.gweiTouched) f.gwei = f.mode === 'pre_armed_spray' ? '0.05' : '0.1'; f.attempts = ''; render(); }));
+  $('#plan').onclick = (e) => busy(e.target, async () => {
+    const fail = (m) => { $('#pe').textContent = m; $('#pe').hidden = false; throw new Error(m); };
+    let amount, cost; try { amount = parse(f.amount, t.decimals); cost = parse(f.cost); } catch { fail('请检查数量和成本的格式'); }
+    if (amount <= 0n || amount > BigInt(t.balance)) fail('卖出数量需大于 0 且不超过持仓');
+    if (cost <= 0n) fail('请填写成本，用于计算最低到账');
+    if (!(Number(f.mult) >= 0.01)) fail('最低成交倍数需大于 0');
+    if (!(Number(f.gwei) >= 0.05)) fail('Gas 价格不能低于 0.05 gwei');
+    if (f.recipient && !/^0x[0-9a-fA-F]{40}$/.test(f.recipient)) fail('收款地址格式不正确');
+    const m = sprayMath(); if (m.cap < m.full) fail('单笔最坏 Gas 花费已超过预算上限，请降低 Gas 价格');
+    if (f.mode === 'pre_armed_spray' && f.probeAddr && !(/^0x[0-9a-fA-F]{40}$/.test(f.probeAddr) && f.probeSel && /^\d+$/.test(f.probeMin) && Number(f.probeMin) > 0)) fail('自动预埋条件不完整：读取进度后选中一个读数并填写阈值，或清空合约地址');
+    const minOut = cost * BigInt(Math.round(Number(f.mult) * 100)) / 100n;
+    const p = await api('/api/plan', { token: t.address, amount: amount.toString(), minOut: minOut.toString(), recipient: f.recipient });
+    S.plan = { ...p, amount: amount.toString(), minOut: minOut.toString(), costWei: cost.toString() }; S.approve = S.create = null; S.step = 3; render();
+  }).catch(() => {});
+};
+
+function actionRow(key, n, title, desc) {
+  const a = S[key] || {}; let right = '', extra = '';
+  if (a.done) right = '<span class="badge ok">已完成</span>';
+  else if (a.preview) {
+    right = `<button class="btn ghost" data-act="${key}:reset">重新预览</button><button class="btn primary" data-act="${key}:exec" ${a.preview.ok ? '' : 'disabled'}>确认并发送</button>`;
+    extra = `<div class="pad" style="border-top:1px solid var(--line);background:var(--bg)"><dl class="kv">
+      <dt>钱包模拟</dt><dd>${a.preview.ok ? '<span class="badge ok">通过</span>' : `<span class="badge bad">失败</span> ${esc(a.preview.error || '')}`}</dd>
+      ${a.preview.allowanceChanges.map((c) => `<dt>授权变化</dt><dd class="num">${units(BigInt(Math.round(Number(c.preAmount))), S.token.decimals, 2)} → ${units(BigInt(Math.round(Number(c.postAmount))), S.token.decimals, 2)}</dd><dt>授权对象</dt><dd class="num">${short(c.spender)}</dd>`).join('')}
+      <dt>App 二次确认</dt><dd>${a.preview.requireConfirmation ? '需要，请留意 Binance App' : '不需要'}</dd>
+      ${a.preview.risks.length ? `<dt>钱包风险提示</dt><dd>${a.preview.risks.map(esc).join('、')}</dd>` : ''}</dl>
+      ${a.waiting ? '<p class="hint" style="margin-top:12px">已提交，正在等待链上确认…</p>' : ''}</div>`;
+  } else right = `<button class="btn" data-act="${key}:preview" ${key === 'create' && !S.approve?.done ? 'disabled' : ''}>预览</button>`;
+  return `<div class="row"><div class="ico ${a.done ? 'ok' : a.preview ? 'wait' : ''}">${a.done ? '✓' : n}</div><div class="grow"><h3>${title}</h3><p>${desc}</p></div>${right}</div>${extra}`;
+}
+V[3] = () => {
+  const p = S.plan, t = S.token;
+  return `<h1>钱包授权</h1><p class="lede">两笔交易都由你的 Agent 钱包发出。每一笔先经钱包模拟，你确认后才会上链。</p>
+  <div class="card">
+    ${actionRow('approve', 1, '限额授权', `只授权本次要卖的 <span class="num">${units(p.amount, t.decimals, 4)}</span> ${esc(t.symbol)} 给执行合约，不做无限授权`)}
+    ${actionRow('create', 2, '创建链上任务', `固定路径、收款地址 <span class="num">${short(p.recipient)}</span> 和最低到账 <span class="num">${units(p.minOut, 18, 6)}</span> BNB`)}
+  </div>
+  <div class="note">随时可以撤销：在监控页移除任务会给出链上取消数据，也可以用钱包把授权额度改回 0。</div>
+  <div class="foot"><button class="btn ghost" id="back">上一步</button><button class="btn primary" id="next" ${S.create?.done ? '' : 'disabled'}>进入监控</button></div>`;
+};
+V[3].bind = () => {
+  document.querySelectorAll('[data-act]').forEach((b) => (b.onclick = () => busy(b, async () => {
+    const [key, act] = b.dataset.act.split(':'), p = S.plan, t = S.token, tx = key === 'approve' ? p.approve : p.create_task;
+    if (act === 'reset') S[key] = null;
+    if (act === 'preview') {
+      if (key === 'approve') { const now = await api('/api/token', { address: t.address }); if (BigInt(now.allowance) >= BigInt(p.amount)) { S.approve = { done: true }; return render(); } }
+      S[key] = { preview: await api('/api/wallet/preview', tx) };
+    }
+    if (act === 'exec') {
+      await api('/api/wallet/execute', { requestId: S[key].preview.requestId }); S[key].waiting = true; render();
+      for (let i = 0; i < 90; i++) {
+        await sleep(2000);
+        if (key === 'approve') { const now = await api('/api/token', { address: t.address }); if (BigInt(now.allowance) >= BigInt(p.amount)) { S.approve = { done: true }; break; } }
+        else { const r = await api('/api/task/onchain', { taskId: p.task_id }); if (r.status === 1) {
+          await api('/api/tasks', { taskId: p.task_id, token: t.address, symbol: t.symbol, decimals: t.decimals, recipient: p.recipient, amount: p.amount, minOut: p.minOut, costWei: p.costWei, mode: S.form.mode, gasPriceGwei: S.form.gwei, maxAttempts: Number(S.form.attempts) || 1, probe: S.form.mode === 'pre_armed_spray' && S.form.probeAddr ? { to: S.form.probeAddr, selector: S.form.probeSel, min: S.form.probeMin } : null });
+          S.create = { done: true }; await refresh(false); break; } }
+      }
+      if (!S[key].done) { S[key].waiting = false; toast('3 分钟内未在链上看到结果，请检查钱包后重新预览'); }
+    }
+    render();
+  }).catch(() => render())));
+};
+
+const STATE = { not_started: ['未启动', ''], ready: ['等待开盘', 'live'], armed: ['已预埋', 'live'], triggered: ['已触发，等待回执', 'live'], confirmed: ['已成交', 'ok'], stopped: ['已停止', 'bad'], expired: ['窗口已过，未成交', 'bad'], cancelled: ['已取消', 'bad'] };
+V[4] = () => {
+  const st = S.status || { tasks: [], attempts: [], logs: [] }, tasks = S.ov.tasks, dry = S.ov.settings.dryRun, pre = S.pre;
+  const rows = tasks.map((k) => {
+    const s = st.tasks.find((x) => x.task_id.toLowerCase() === k.taskId.toLowerCase()) || { state: 'not_started', attempts: 0, metrics: [] };
+    let [label, cls] = STATE[s.state] || [s.state, '']; if (k.probe && s.state === 'ready') label = st.running ? `等待进度达到 ${Number(k.probe.min).toLocaleString('en-US')}` : '未启动'; const met = Object.fromEntries(s.metrics || []); const res = s.result ? JSON.parse(s.result) : null;
+    let place = ''; if (res && 'block_delta' in met) place = met.same_block_after_launch ? '与开盘同块，排在开盘之后' : met.block_delta > 0 ? `开盘后第 ${met.block_delta} 个区块` : '区块位置待确认';
+    return `<div class="card" style="margin-bottom:14px"><div class="row"><div class="grow"><h3>${esc(k.symbol)} <span class="badge ${cls}">${label}</span></h3>
+      <p>${k.mode === 'pre_armed_spray' ? '预埋同块' : '下一块卖出'}，卖出 <span class="num">${units(k.amount, k.decimals, 2)}</span>，最低到账 <span class="num">${units(k.minOut, 18, 6)}</span> BNB，已发送 ${s.attempts} 笔</p></div>
+      <button class="btn danger" data-rm="${k.taskId}" ${st.running ? 'disabled' : ''}>移除</button></div>
+      ${res ? `<div class="pad" style="border-top:1px solid var(--line)"><dl class="kv"><dt>实际到账</dt><dd class="num"><b>${units(res.received, 18, 6)} BNB</b>${BigInt(k.costWei) > 0n ? `（${(Number(BigInt(res.received) * 100n / BigInt(k.costWei)) / 100).toFixed(2)}× 成本）` : ''}</dd>
+        <dt>成交位置</dt><dd>${place}</dd><dt>成交区块 / 序号</dt><dd class="num">${res.block} / ${res.tx_index}</dd><dt>Gas 花费</dt><dd class="num">${units(res.cost_wei, 18, 7)} BNB</dd><dt>交易</dt><dd class="num"><a href="https://bscscan.com/tx/${res.tx}" target="_blank" rel="noopener" style="color:var(--accent)">${short(res.tx)}</a></dd></dl></div>` : ''}</div>`;
+  }).join('');
+  return `<h1>监控执行</h1><p class="lede">${dry ? '当前为模拟运行：触发时只签名并记录，不会广播任何交易。' : '当前为实盘：触发时会真实广播卖出交易。'}</p>
+  ${rows || '<div class="card empty">还没有任务。回到第 2 步选择代币并创建任务。</div>'}
+  <div class="card"><div class="row"><div class="grow"><h3>启动前预检</h3><p>${pre ? (pre.ok ? '全部通过' : '有未通过的项目，启动后任务可能无法成交') : '读取链上授权、余额、任务状态和执行账户资金'}</p></div><button class="btn" id="pre">运行预检</button></div>
+    ${pre ? `<table><tbody>${pre.checks.map((c) => `<tr><td><span class="badge ${c.ok ? 'ok' : 'bad'}">${c.ok ? '通过' : '未通过'}</span></td><td>${esc(PRE[c.name] || c.name)}</td><td class="r num mute">${esc(c.detail.length > 46 ? c.detail.slice(0, 46) + '…' : c.detail)}</td></tr>`).join('')}</tbody></table>` : ''}</div>
+  <div class="foot" style="justify-content:space-between;align-items:center"><span class="dim" style="font-size:12.5px">${st.running ? '<i class="dot live" style="display:inline-block;margin-right:7px"></i>监控运行中' : '监控未运行'}</span>
+    ${st.running ? '<button class="btn danger" id="stop">停止监控</button>' : `<button class="btn primary" id="start" ${tasks.length ? '' : 'disabled'}>${dry ? '启动模拟监控' : '启动实盘监控'}</button>`}</div>
+  <div class="card pad" style="margin-top:22px"><h2 style="font-size:12.5px;color:var(--dim);margin-bottom:10px">运行日志</h2><div class="log">${(st.logs || []).slice().reverse().map((l) => `<div class="${esc(l.level || '')}">${esc(l.t ? l.t.slice(11, 23) + '  ' : '')}${esc(l.msg || '')}${l.f?.reason ? '  ' + esc(l.f.reason) : ''}${l.f?.to ? '  → ' + esc(l.f.to) : ''}</div>`).join('') || '<div class="mute" style="border:0">启动后这里显示守护进程日志</div>'}</div></div>`;
+};
+const PRE = { allowance: '授权额度', owner_token_balance: '钱包代币余额', task_open: '链上任务有效', task_owner: '任务归属', task_executor: '执行账户匹配', task_tokens: '代币与工厂匹配', task_amount: '数量不超上限', task_floor: '最低到账不低于底线', executor_bnb: '执行账户 BNB', attempt_fits_budget: '单笔花费在预算内' };
+V[4].bind = () => {
+  $('#pre').onclick = (e) => busy(e.target, async () => { S.pre = await api('/api/preflight', {}); render(); }).catch(() => {});
+  $('#start') && ($('#start').onclick = (e) => { const go = () => busy(e.target, async () => { await api('/api/daemon/start', {}); await poll(); });
+    S.ov.settings.dryRun ? go().catch(() => {}) : confirmDlg('启动实盘监控', '满足触发条件时会真实广播卖出交易，失败的交易同样消耗 Gas。发出的交易无法撤回。', '启动实盘', go); });
+  $('#stop') && ($('#stop').onclick = (e) => busy(e.target, async () => { await api('/api/daemon/stop', {}); await sleep(600); await poll(); }).catch(() => {}));
+  document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => confirmDlg('移除任务', '本地停止监控该任务。链上任务和授权仍然存在，移除后会给出取消数据，可用钱包发送以彻底撤销。', '移除', async () => {
+    const r = await api('/api/tasks/remove', { taskId: b.dataset.rm }); await refresh(false);
+    infoDlg('任务已移除', `如需在链上取消，请用钱包向 <span class="num">${short(r.to)}</span> 发送以下数据：<div class="in" style="margin-top:12px;height:auto;padding:10px"><span class="num" style="font-size:11.5px;overflow-wrap:anywhere">${r.cancelCalldata}</span></div>`);
+  })));
+};
+
+// ------------------------------------------------------------ dialogs
+function confirmDlg(title, text, ok, fn) {
+  const d = $('#dlg'); d.innerHTML = `<h2>${title}</h2><p class="dim">${text}</p><div class="foot"><button class="btn ghost" id="dc">取消</button><button class="btn primary" id="dk">${ok}</button></div>`;
+  d.showModal(); $('#dc').onclick = () => d.close();
+  $('#dk').onclick = (e) => busy(e.target, fn).then(() => { d.close(); render(); }).catch(() => {});
+}
+function promptDlg(title, label, fn) {
+  const d = $('#dlg'); d.innerHTML = `<h2>${title}</h2><div class="field" style="margin-top:14px"><label for="dv">${label}</label><div class="in"><input id="dv" placeholder="0x…" spellcheck="false"></div></div><div class="foot"><button class="btn ghost" id="dc">取消</button><button class="btn primary" id="dk">确定</button></div>`;
+  d.showModal(); $('#dc').onclick = () => d.close();
+  $('#dk').onclick = (e) => busy(e.target, () => fn($('#dv').value.trim())).then(() => { d.close(); render(); }).catch(() => {});
+}
+function infoDlg(title, html) { const d = $('#dlg'); d.innerHTML = `<h2>${title}</h2><p class="dim">${html}</p><div class="foot"><button class="btn primary" id="dc">知道了</button></div>`; d.showModal(); $('#dc').onclick = () => d.close(); }
+function settingsDlg() {
+  if (S.status?.running) return toast('请先停止监控再修改设置');
+  const c = S.ov.settings, d = $('#dlg');
+  d.innerHTML = `<h2>设置</h2>
+    <div class="field" style="margin-top:14px"><label for="sh">RPC（HTTP）</label><div class="in"><input id="sh" spellcheck="false" value="${esc(c.rpcHttp)}"></div></div>
+    <div class="field"><label for="sw">RPC（WebSocket，可选）</label><div class="in"><input id="sw" spellcheck="false" placeholder="wss://…" value="${esc(c.rpcWs)}"></div><div class="hint">填写后开盘日志由节点实时推送，比轮询更快</div></div>
+    <div class="field"><label for="sb">每个任务的执行预算</label><div class="in"><input id="sb" inputmode="decimal" value="${esc(c.budgetUsd)}"><span class="unit">USDT</span></div><div class="hint">成功和失败交易的 Gas 都计入。对已启动过的任务不追溯</div></div>
+    <div class="foot"><button class="btn ghost" id="dc">取消</button><button class="btn primary" id="dk">保存</button></div>`;
+  d.showModal(); $('#dc').onclick = () => d.close();
+  $('#dk').onclick = (e) => busy(e.target, async () => {
+    const budgetUsd = Number($('#sb').value), rpcHttp = $('#sh').value.trim(), rpcWs = $('#sw').value.trim();
+    if (!/^https?:\/\//.test(rpcHttp)) throw new Error('HTTP RPC 需以 http:// 或 https:// 开头');
+    if (rpcWs && !/^wss?:\/\//.test(rpcWs)) throw new Error('WebSocket RPC 需以 ws:// 或 wss:// 开头');
+    if (!(budgetUsd > 0 && budgetUsd <= 50)) throw new Error('预算需在 0 到 50 USDT 之间');
+    await api('/api/settings', { rpcHttp, rpcWs, budgetUsd }); S.form.attempts = ''; await refresh(false);
+  }).then(() => { d.close(); render(); }).catch(() => {});
+}
+function toggleDry() {
+  const dry = S.ov.settings.dryRun, set = async (v) => { await api('/api/settings', { dryRun: v }); await refresh(false); };
+  if (S.status?.running) return toast('请先停止监控再切换');
+  dry ? confirmDlg('切换到实盘', '实盘下，监控触发时会真实广播交易并消耗执行账户的 BNB。请确认已完成预检，并且你明确要进行真实卖出。', '切换到实盘', () => set(false)) : set(true).then(render);
+}
+
+// ------------------------------------------------------------ loop
+function render() {
+  const r = reach(); if (!r[S.step]) S.step = r.lastIndexOf(true) > S.step ? S.step : Math.max(0, r.indexOf(false) - 1);
+  renderChrome();
+  const html = V[S.step]();
+  if (render.step === S.step && render.html === html) return; // nothing changed: no repaint, no flicker
+  const keep = document.activeElement?.id, top = $('.log')?.scrollTop;
+  $('#view').innerHTML = `<div class="${render.step === S.step ? '' : 'fade'}">${html}</div>`;
+  if (top) $('.log').scrollTop = top;
+  render.step = S.step; render.html = html;
+  V[S.step].bind?.();
+  $('#next') && ($('#next').onclick = () => { S.step++; render(); });
+  $('#back') && ($('#back').onclick = () => { S.step--; render(); });
+  document.querySelectorAll('[data-copy]').forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制'))));
+  if (keep && $('#' + keep)) $('#' + keep).focus();
+}
+async function refresh(draw = true) { S.ov = await api('/api/overview'); if (draw) render(); else renderChrome(); }
+async function poll() { try { S.status = await api('/api/status'); if (S.ov && S.status.head) S.ov.head = S.status.head; if (S.step === 4 && !$('#dlg').open) render(); else renderChrome(); } catch {} }
+
+(async () => {
+  $('#view').innerHTML = '<div class="card empty">正在读取钱包与链上状态…</div>';
+  try { await refresh(false); } catch (e) { $('#view').innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
+  S.step = S.ov.tasks.length ? 4 : envReady() ? 1 : 0;
+  await poll(); render();
+  setInterval(poll, 2500);
+  setInterval(() => S.step === 0 && !$('#dlg').open && refresh().catch(() => {}), 8000);
+})();
+</script>
+</body>
+</html>
