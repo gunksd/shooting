@@ -89,6 +89,33 @@ enum Cmd {
     },
 }
 
+/// Looks for a SellExecutor this account created, by checking the CREATE addresses of its past nonces.
+async fn find_deployed(
+    http: &dyn ChainRpc,
+    from: Address,
+    init_code_hex: &str,
+) -> Result<Option<Address>> {
+    let used = rpc::nonce_at(http, from, "latest").await?;
+    let init = init_code_hex.trim_start_matches("0x").to_ascii_lowercase();
+    for n in 0..used.min(64) {
+        let a = from.create(n);
+        let code = rpc::code(http, a).await?;
+        if code.len() < 64 {
+            continue;
+        }
+        // Runtime code without its trailing CBOR metadata must appear inside the init code.
+        let hex = alloy::primitives::hex::encode(&code);
+        let meta = usize::from_str_radix(&hex[hex.len() - 4..], 16).unwrap_or(0);
+        let body = hex
+            .get(..hex.len().saturating_sub((meta + 2) * 2))
+            .unwrap_or("");
+        if !body.is_empty() && init.contains(body) {
+            return Ok(Some(a));
+        }
+    }
+    Ok(None)
+}
+
 fn signer(cfg: &Config) -> Result<ExecSigner> {
     match (&cfg.executor.key_file, &cfg.executor.key_env) {
         (Some(f), _) => ExecSigner::from_file(f, cfg.chain_id),
@@ -225,12 +252,15 @@ async fn main() -> Result<()> {
             let s = signer(&cfg)?;
             let v: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&artifact).context("artifact")?)?;
-            let code: alloy::primitives::Bytes = alloy::primitives::hex::decode(
-                v["bytecode"]["object"]
-                    .as_str()
-                    .context("artifact has no bytecode")?,
-            )?
-            .into();
+            let init = v["bytecode"]["object"]
+                .as_str()
+                .context("artifact has no bytecode")?;
+            let code: alloy::primitives::Bytes = alloy::primitives::hex::decode(init)?.into();
+            // Never deploy twice: reuse an executor this account already created.
+            if let Some(found) = find_deployed(http.as_ref(), s.address(), init).await? {
+                println!("{}", serde_json::json!({"address": found, "reused": true}));
+                return Ok(());
+            }
             let est = http
                 .request(
                     "eth_estimateGas",
@@ -242,6 +272,7 @@ async fn main() -> Result<()> {
             let price = rpc::gas_price(http.as_ref()).await?;
             let nonce = rpc::nonce_at(http.as_ref(), s.address(), "pending").await?;
             let tx = s.sign_create(nonce, price, gas, code)?;
+            let address = s.address().create(nonce);
             rpc::send_raw(http.as_ref(), &tx.raw).await?;
             for _ in 0..120 {
                 if let Some(r) = rpc::receipt(http.as_ref(), tx.hash).await? {
@@ -250,16 +281,18 @@ async fn main() -> Result<()> {
                     }
                     println!(
                         "{}",
-                        serde_json::json!({"address": s.address().create(nonce), "tx": tx.hash, "cost_wei": (r.gas_used as u128 * price).to_string()})
+                        serde_json::json!({"address": address, "tx": tx.hash, "cost_wei": (r.gas_used as u128 * price).to_string()})
                     );
+                    return Ok(());
+                }
+                // The receipt may lag on some nodes; the code at the address is the ground truth.
+                if rpc::code_len(http.as_ref(), address).await.unwrap_or(0) > 0 {
+                    println!("{}", serde_json::json!({"address": address, "tx": tx.hash}));
                     return Ok(());
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            bail!(
-                "deployment transaction {} not confirmed within 60s; check it before retrying",
-                tx.hash
-            )
+            bail!("deployment transaction {} not confirmed within 60s; reopen the console, it will pick the contract up once mined", tx.hash)
         }
         Cmd::Status => {
             let store = Store::open(&cfg.db_path)?;

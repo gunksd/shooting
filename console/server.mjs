@@ -117,6 +117,16 @@ function probeOf(p) {
   return { to: p.to, selector: p.selector.toLowerCase(), min: BigInt(p.min).toString() };
 }
 
+let deploying = false, adoptChecked = 0;
+// Picks up an executor contract that was deployed but not recorded (e.g. the console was closed mid-deploy).
+async function adoptDeployed() {
+  if (Date.now() - adoptChecked < 30000) return; adoptChecked = Date.now();
+  const a = await executor().catch(() => null); if (!a) return;
+  if (Number(await rpc('eth_getTransactionCount', [a, 'latest']).catch(() => '0x0')) === 0) return;
+  const r = await shooter('deploy', '--artifact', ARTIFACT).catch(() => null);
+  if (r?.reused && isAddr(r.address)) { state.executorContract = r.address; state.deploy = r; save(); }
+}
+
 // ---------------------------------------------------------------- daemon
 let daemon = null; const logs = [];
 function startDaemon() {
@@ -139,6 +149,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, shutdown);
 // ---------------------------------------------------------------- api
 const api = {
   async 'GET /api/overview'() {
+    if (!state.executorContract && !deploying && fs.existsSync(F.key)) await adoptDeployed();
     const out = { settings: state.settings, daemon: { running: !!daemon }, tasks: state.tasks.filter((t) => !t.archived), constants: { gasLimit: GAS_LIMIT, gasFail: GAS_FAIL }, binary: !!BIN, errors: {} };
     const jobs = {
       wallet: async () => ({ address: await wallet() }),
@@ -168,8 +179,13 @@ const api = {
   },
   async 'POST /api/deploy'() {
     if (state.executorContract) throw new Error('执行合约已部署');
-    const r = await shooter('deploy', '--artifact', ARTIFACT);
-    state.executorContract = r.address; state.deploy = r; save(); return r;
+    if (deploying) throw new Error('正在部署，请稍候');
+    deploying = true;
+    try {
+      // The CLI reuses a contract this account already deployed, so a retry never sends a second deployment.
+      const r = await shooter('deploy', '--artifact', ARTIFACT);
+      state.executorContract = r.address; state.deploy = r; save(); return r;
+    } finally { deploying = false; }
   },
   async 'POST /api/contract/use'(b) {
     if (!isAddr(b.address)) throw new Error('合约地址格式不正确');

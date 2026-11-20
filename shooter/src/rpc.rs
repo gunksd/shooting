@@ -152,10 +152,24 @@ pub async fn send_raw(rpc: &dyn ChainRpc, raw: &Bytes) -> Result<B256, RpcError>
     de(rpc.request("eth_sendRawTransaction", json!([raw])).await?)
 }
 
+/// Some public nodes (publicnode.com) answer a lookup of a not-yet-indexed transaction with an
+/// "archive request" error instead of `null`. For a receipt that means "not mined yet".
+pub fn is_not_found(e: &RpcError) -> bool {
+    matches!(e, RpcError::Rpc { message, .. } if {
+        let m = message.to_ascii_lowercase();
+        m.contains("archive") || m.contains("not found") || m.contains("unknown transaction") || m.contains("transaction indexing is in progress")
+    })
+}
+
 pub async fn receipt(rpc: &dyn ChainRpc, hash: B256) -> Result<Option<Receipt>, RpcError> {
-    let v = rpc
+    let v = match rpc
         .request("eth_getTransactionReceipt", json!([hash]))
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) if is_not_found(&e) => return Ok(None),
+        Err(e) => return Err(e),
+    };
     if v.is_null() {
         Ok(None)
     } else {
@@ -212,6 +226,14 @@ pub async fn head_by_tag(rpc: &dyn ChainRpc, tag: &str) -> Result<Option<Head>, 
     }
 }
 
+pub async fn code(rpc: &dyn ChainRpc, who: Address) -> Result<Bytes, RpcError> {
+    de(rpc.request("eth_getCode", json!([who, "latest"])).await?)
+}
+
+pub async fn code_len(rpc: &dyn ChainRpc, who: Address) -> Result<usize, RpcError> {
+    Ok(code(rpc, who).await?.len())
+}
+
 pub async fn raw_tx_by_hash(rpc: &dyn ChainRpc, hash: B256) -> Result<Option<Bytes>, RpcError> {
     let v = rpc
         .request("eth_getRawTransactionByHash", json!([hash]))
@@ -220,5 +242,27 @@ pub async fn raw_tx_by_hash(rpc: &dyn ChainRpc, hash: B256) -> Result<Option<Byt
         Ok(None)
     } else {
         de(v).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_error_means_not_found() {
+        let e = RpcError::Rpc { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode".into(), data: None };
+        assert!(is_not_found(&e));
+        assert!(is_not_found(&RpcError::Rpc {
+            code: -32000,
+            message: "transaction indexing is in progress".into(),
+            data: None
+        }));
+        assert!(!is_not_found(&RpcError::Rpc {
+            code: -32000,
+            message: "execution reverted".into(),
+            data: None
+        }));
+        assert!(!is_not_found(&RpcError::Timeout));
     }
 }
