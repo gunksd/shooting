@@ -244,7 +244,12 @@ const api = {
     return { requestId: d.requestId, ok: sim.simulationCode === '000000000' && !sim.simulationErrorDetail, error: sim.simulationErrorDetail, type: d.parsedTx?.transactionType, requireConfirmation: !!d.requireConfirmation,
       allowanceChanges: sim.allowanceChanges || [], balanceChanges: sim.balanceChanges || [], risks: Object.values(d.risks?.addresses || {}).flatMap((a) => a.riskDetails || []).map((x) => x.title), expiresAt: d.expiresAt };
   },
-  async 'POST /api/wallet/execute'(b) { return { result: await baw('contract-call', 'execute', '--requestId', String(b.requestId)) }; },
+  async 'POST /api/wallet/execute'(b) {
+    const d = await baw('contract-call', 'execute', '--requestId', String(b.requestId));
+    // PENDING_CONFIRMATION: the wallet's risk control wants the user to approve in the Binance App first.
+    return { status: d.status || null, txHash: d.txHash || null, pendingConfirmation: d.status === 'PENDING_CONFIRMATION' };
+  },
+  async 'GET /api/wallet/lock'() { return { status: (await baw('wallet', 'tx-lock', '--binanceChainId', '56')).status }; },
   async 'POST /api/task/onchain'(b) {
     const r = await call(state.executorContract, '0x' + GET_TASK + b.taskId.slice(2));
     return { owner: '0x' + r.slice(2 + 64 + 24, 2 + 128), status: Number(big('0x' + r.slice(2 + 128, 2 + 192))) };

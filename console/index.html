@@ -148,6 +148,7 @@ dialog h2{font-size:18px;letter-spacing:-.01em;margin-bottom:8px}
 <script>
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const floorText = (minOut, d = 6) => (BigInt(minOut) <= 1n ? '不设底价' : units(minOut, 18, d) + ' BNB');
 const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
 const units = (v, d = 18, p = 6) => { v = BigInt(v || 0); const b = 10n ** BigInt(d); const i = v / b; let f = (v % b).toString().padStart(d, '0').slice(0, p).replace(/0+$/, ''); return i.toLocaleString('en-US') + (f ? '.' + f : ''); };
 const parse = (s, d = 18) => { s = String(s).trim().replace(/,/g, ''); if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') throw new Error('数字格式不正确'); const [i, f = ''] = s.split('.'); return BigInt(i || '0') * 10n ** BigInt(d) + BigInt((f + '0'.repeat(d)).slice(0, d) || '0'); };
@@ -159,7 +160,7 @@ async function api(path, body) {
 async function busy(btn, fn) { btn.classList.add('busy'); btn.disabled = true; try { return await fn(); } catch (e) { toast(e.message); throw e; } finally { btn.classList.remove('busy'); btn.disabled = false; } }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const S = { step: 0, ov: null, token: null, form: { amount: '', cost: '', mult: '2', mode: 'pre_armed_spray', gwei: '0.05', gweiTouched: false, attempts: '', recipient: '', probeAddr: '', probeSel: '', probeMin: '' }, probes: null, plan: null, approve: null, create: null, status: null, pre: null };
+const S = { step: 0, ov: null, token: null, form: { amount: '', cost: '', mult: '2', market: false, mode: 'pre_armed_spray', gwei: '0.05', gweiTouched: false, attempts: '', recipient: '', probeAddr: '', probeSel: '', probeMin: '' }, probes: null, plan: null, approve: null, create: null, status: null, pre: null };
 const STEPS = [['准备环境', '钱包、执行账户、合约'], ['选择代币', '输入合约地址并体检'], ['卖出参数', '数量、底线、模式'], ['钱包授权', '限额授权并创建任务'], ['监控执行', '预检、启动、结果']];
 
 const envReady = () => S.ov?.wallet && S.ov?.executor && S.ov?.contract?.deployed;
@@ -187,11 +188,11 @@ function renderSide() {
   if (t) {
     let floor = '', amt = '';
     try { amt = units(parse(f.amount || '0', t.decimals), t.decimals, 4); } catch {}
-    try { floor = units(parse(f.cost || '0') * BigInt(Math.round(Number(f.mult || 0) * 100)) / 100n, 18, 6); } catch {}
+    try { floor = f.market ? '不设底价' : units(parse(f.cost || '0') * BigInt(Math.round(Number(f.mult || 0) * 100)) / 100n, 18, 6) + ' BNB'; } catch {}
     h += `<div class="card pad"><h2>任务摘要</h2><dl class="kv">
       <dt>代币</dt><dd><b>${esc(t.symbol) || '未知'}</b> <span class="num mute">${short(t.address)}</span></dd>
       <dt>卖出数量</dt><dd class="num">${amt || '0'}</dd>
-      <dt>最低到账</dt><dd class="num">${floor || '0'} BNB</dd>
+      <dt>最低到账</dt><dd class="num">${floor || '0 BNB'}</dd>
       <dt>模式</dt><dd>${f.mode === 'pre_armed_spray' ? '预埋同块' : '下一块卖出'}</dd>
       ${f.mode === 'pre_armed_spray' ? `<dt>开始预埋</dt><dd>${f.probeAddr && f.probeSel && f.probeMin ? `进度达到 <span class="num">${esc(f.probeMin)}</span>` : '启动监控后立即'}</dd>` : ''}
       <dt>收款地址</dt><dd class="num">${short(f.recipient || o.wallet?.address)}</dd></dl></div>`;
@@ -274,10 +275,14 @@ V[2] = () => {
   return `<h1>卖出参数</h1><p class="lede">最低到账写入链上任务，执行账户只能把它调高。达不到就整笔回滚，不成交。</p>
   <div class="grid2">
     <div class="field"><label for="fa">卖出数量</label><div class="in"><input id="fa" inputmode="decimal" value="${esc(f.amount)}"><span class="unit">${esc(t.symbol)}</span><button id="all" type="button">全部</button></div><div class="hint">持仓 <span class="num">${units(t.balance, t.decimals, 4)}</span></div></div>
-    <div class="field"><label for="fc">这部分代币的成本</label><div class="in"><input id="fc" inputmode="decimal" placeholder="例如 0.03" value="${esc(f.cost)}"><span class="unit">BNB</span></div><div class="hint">用于计算最低到账，不会上链</div></div>
+    ${f.market ? '' : `<div class="field"><label for="fc">这部分代币的成本</label><div class="in"><input id="fc" inputmode="decimal" placeholder="例如 0.03" value="${esc(f.cost)}"><span class="unit">BNB</span></div><div class="hint">用于计算最低到账，不会上链</div></div>`}
   </div>
+  <div class="field"><label>成交底价</label><div class="seg">
+    <button type="button" aria-pressed="${!f.market}" data-floor="min"><b>设最低到账</b><span>按成本的倍数设底价，卖不到就不成交，代币留在钱包。</span></button>
+    <button type="button" aria-pressed="${f.market}" data-floor="market"><b>开盘即卖，不设底价</b><span>不用填成本。开盘后按当时池子价格全部卖出，卖多少算多少。</span></button></div>
+    ${f.market ? '<div class="note bad" style="margin-top:12px">不设底价时，如果有人抢在你前面大量卖出，或者开盘价本身很低，你会以很差的价格成交，卖出不可撤回。合约只拦截到账为 0 的情况。</div>' : ''}</div>
   <div class="grid2">
-    <div class="field"><label for="fm">最低成交倍数</label><div class="in"><input id="fm" inputmode="decimal" value="${esc(f.mult)}"><span class="unit">× 成本</span></div><div class="hint" id="floor"></div></div>
+    ${f.market ? '' : `<div class="field"><label for="fm">最低成交倍数</label><div class="in"><input id="fm" inputmode="decimal" value="${esc(f.mult)}"><span class="unit">× 成本</span></div><div class="hint" id="floor"></div></div>`}
     <div class="field"><label for="fg">Gas 价格</label><div class="in"><input id="fg" inputmode="decimal" value="${esc(f.gwei)}"><span class="unit">gwei</span></div><div class="hint">${spray ? '预埋建议用最低价 0.05：失败成本最低。区块内通常按 Gas 价格从高到低排，低价更可能排在开盘交易之后（观察所得，出块方不保证）' : 'BSC 最低 0.05。价格越高，在下一块里通常越靠前'}</div></div>
   </div>
   <div class="field"><label>执行模式</label><div class="seg">
@@ -298,26 +303,29 @@ V[2] = () => {
 };
 V[2].bind = () => {
   const f = S.form, t = S.token;
-  const sync = () => { f.amount = $('#fa').value; f.cost = $('#fc').value; f.mult = $('#fm').value; f.gwei = $('#fg').value; f.recipient = $('#fr').value.trim(); if ($('#fn')) f.attempts = $('#fn').value; if ($('#fp')) f.probeAddr = $('#fp').value.trim(); if ($('#fpm')) f.probeMin = $('#fpm').value.trim();
-    try { const fl = parse(f.cost) * BigInt(Math.round(Number(f.mult) * 100)) / 100n; $('#floor').innerHTML = fl > 0n ? `最低到账 <span class="num">${units(fl, 18, 6)}</span> BNB` : '填写成本后计算'; } catch { $('#floor').textContent = '填写成本后计算'; }
+  const sync = () => { f.amount = $('#fa').value; if ($('#fc')) f.cost = $('#fc').value; if ($('#fm')) f.mult = $('#fm').value; f.gwei = $('#fg').value; f.recipient = $('#fr').value.trim(); if ($('#fn')) f.attempts = $('#fn').value; if ($('#fp')) f.probeAddr = $('#fp').value.trim(); if ($('#fpm')) f.probeMin = $('#fpm').value.trim();
+    if ($('#floor')) try { const fl = parse(f.cost) * BigInt(Math.round(Number(f.mult) * 100)) / 100n; $('#floor').innerHTML = fl > 0n ? `最低到账 <span class="num">${units(fl, 18, 6)}</span> BNB` : '填写成本后计算'; } catch { $('#floor').textContent = '填写成本后计算'; }
     renderSide(); };
   ['fa', 'fc', 'fm', 'fg', 'fr', 'fn', 'fp', 'fpm'].forEach((id) => $('#' + id) && ($('#' + id).oninput = sync)); sync();
   $('#fg').onchange = () => { f.gweiTouched = true; f.attempts = ''; render(); };
   $('#scan') && ($('#scan').onclick = (e) => busy(e.target, async () => { sync(); S.probes = (await api('/api/probe/scan', { address: f.probeAddr })).candidates; f.probeSel = ''; render(); }).catch(() => {}));
   document.querySelectorAll('[data-sel]').forEach((b) => (b.onclick = () => { sync(); f.probeSel = b.dataset.sel; render(); }));
   $('#all').onclick = () => { $('#fa').value = units(t.balance, t.decimals, t.decimals).replace(/,/g, ''); sync(); };
+  document.querySelectorAll('[data-floor]').forEach((b) => (b.onclick = () => { sync(); f.market = b.dataset.floor === 'market'; render(); }));
   document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { sync(); f.mode = b.dataset.mode; if (!f.gweiTouched) f.gwei = f.mode === 'pre_armed_spray' ? '0.05' : '0.1'; f.attempts = ''; render(); }));
   $('#plan').onclick = (e) => busy(e.target, async () => {
     const fail = (m) => { $('#pe').textContent = m; $('#pe').hidden = false; throw new Error(m); };
-    let amount, cost; try { amount = parse(f.amount, t.decimals); cost = parse(f.cost); } catch { fail('请检查数量和成本的格式'); }
+    if (!f.market && !String(f.cost).trim()) fail('请填写成本，或选择「开盘即卖，不设底价」');
+    let amount, cost = 0n; try { amount = parse(f.amount, t.decimals); if (!f.market) cost = parse(f.cost); } catch { fail('请检查数量和成本的格式'); }
     if (amount <= 0n || amount > BigInt(t.balance)) fail('卖出数量需大于 0 且不超过持仓');
-    if (cost <= 0n) fail('请填写成本，用于计算最低到账');
-    if (!(Number(f.mult) >= 0.01)) fail('最低成交倍数需大于 0');
+    if (!f.market && cost <= 0n) fail('请填写成本，或选择「开盘即卖，不设底价」');
+    if (!f.market && !(Number(f.mult) >= 0.01)) fail('最低成交倍数需大于 0');
     if (!(Number(f.gwei) >= 0.05)) fail('Gas 价格不能低于 0.05 gwei');
     if (f.recipient && !/^0x[0-9a-fA-F]{40}$/.test(f.recipient)) fail('收款地址格式不正确');
     const m = sprayMath(); if (m.cap < m.full) fail('单笔最坏 Gas 花费已超过预算上限，请降低 Gas 价格');
     if (f.mode === 'pre_armed_spray' && f.probeAddr && !(/^0x[0-9a-fA-F]{40}$/.test(f.probeAddr) && f.probeSel && /^\d+$/.test(f.probeMin) && Number(f.probeMin) > 0)) fail('自动预埋条件不完整：读取进度后选中一个读数并填写阈值，或清空合约地址');
-    const minOut = cost * BigInt(Math.round(Number(f.mult) * 100)) / 100n;
+    // 1 wei is the smallest floor the contract accepts: it only rules out a sale that pays nothing.
+    const minOut = f.market ? 1n : cost * BigInt(Math.round(Number(f.mult) * 100)) / 100n;
     const p = await api('/api/plan', { token: t.address, amount: amount.toString(), minOut: minOut.toString(), recipient: f.recipient });
     S.plan = { ...p, amount: amount.toString(), minOut: minOut.toString(), costWei: cost.toString() }; S.approve = S.create = null; S.step = 3; render();
   }).catch(() => {});
@@ -327,13 +335,13 @@ function actionRow(key, n, title, desc) {
   const a = S[key] || {}; let right = '', extra = '';
   if (a.done) right = '<span class="badge ok">已完成</span>';
   else if (a.preview) {
-    right = `<button class="btn ghost" data-act="${key}:reset">重新预览</button><button class="btn primary" data-act="${key}:exec" ${a.preview.ok ? '' : 'disabled'}>确认并发送</button>`;
+    right = a.waiting ? '<span class="badge live">等待确认</span>' : `<button class="btn ghost" data-act="${key}:reset">重新预览</button><button class="btn primary" data-act="${key}:exec" ${a.preview.ok ? '' : 'disabled'}>确认并发送</button>`;
     extra = `<div class="pad" style="border-top:1px solid var(--line);background:var(--bg)"><dl class="kv">
       <dt>钱包模拟</dt><dd>${a.preview.ok ? '<span class="badge ok">通过</span>' : `<span class="badge bad">失败</span> ${esc(a.preview.error || '')}`}</dd>
       ${a.preview.allowanceChanges.map((c) => `<dt>授权变化</dt><dd class="num">${units(BigInt(Math.round(Number(c.preAmount))), S.token.decimals, 2)} → ${units(BigInt(Math.round(Number(c.postAmount))), S.token.decimals, 2)}</dd><dt>授权对象</dt><dd class="num">${short(c.spender)}</dd>`).join('')}
       <dt>App 二次确认</dt><dd>${a.preview.requireConfirmation ? '需要，请留意 Binance App' : '不需要'}</dd>
       ${a.preview.risks.length ? `<dt>钱包风险提示</dt><dd>${a.preview.risks.map(esc).join('、')}</dd>` : ''}</dl>
-      ${a.waiting ? '<p class="hint" style="margin-top:12px">已提交，正在等待链上确认…</p>' : ''}</div>`;
+      ${a.waiting ? `<p class="hint" style="margin-top:12px">${a.app ? '<b style="color:var(--accent)">请打开 Binance App 确认这笔交易</b>（钱包风控要求，5 分钟内有效）。确认后这里会自动完成。' : '已提交，正在等待链上确认…'}</p>` : ''}</div>`;
   } else right = `<button class="btn" data-act="${key}:preview" ${key === 'create' && !S.approve?.done ? 'disabled' : ''}>预览</button>`;
   return `<div class="row"><div class="ico ${a.done ? 'ok' : a.preview ? 'wait' : ''}">${a.done ? '✓' : n}</div><div class="grow"><h3>${title}</h3><p>${desc}</p></div>${right}</div>${extra}`;
 }
@@ -342,7 +350,7 @@ V[3] = () => {
   return `<h1>钱包授权</h1><p class="lede">两笔交易都由你的 Agent 钱包发出。每一笔先经钱包模拟，你确认后才会上链。</p>
   <div class="card">
     ${actionRow('approve', 1, '限额授权', `只授权本次要卖的 <span class="num">${units(p.amount, t.decimals, 4)}</span> ${esc(t.symbol)} 给执行合约，不做无限授权`)}
-    ${actionRow('create', 2, '创建链上任务', `固定路径、收款地址 <span class="num">${short(p.recipient)}</span> 和最低到账 <span class="num">${units(p.minOut, 18, 6)}</span> BNB`)}
+    ${actionRow('create', 2, '创建链上任务', `固定路径、收款地址 <span class="num">${short(p.recipient)}</span> 和最低到账 <span class="num">${floorText(p.minOut)}</span>`)}
   </div>
   <div class="note">随时可以撤销：在监控页移除任务会给出链上取消数据，也可以用钱包把授权额度改回 0。</div>
   <div class="foot"><button class="btn ghost" id="back">上一步</button><button class="btn primary" id="next" ${S.create?.done ? '' : 'disabled'}>进入监控</button></div>`;
@@ -356,15 +364,19 @@ V[3].bind = () => {
       S[key] = { preview: await api('/api/wallet/preview', tx) };
     }
     if (act === 'exec') {
-      await api('/api/wallet/execute', { requestId: S[key].preview.requestId }); S[key].waiting = true; render();
-      for (let i = 0; i < 90; i++) {
+      if (S[key].preview.expiresAt && Date.now() > S[key].preview.expiresAt - 3000) { S[key] = null; render(); throw new Error('预览已过期，请重新预览'); }
+      const ex = await api('/api/wallet/execute', { requestId: S[key].preview.requestId });
+      S[key].waiting = true; S[key].app = ex.pendingConfirmation; render();
+      if (ex.pendingConfirmation) toast('请在 Binance App 里确认这笔交易');
+      else if (!ex.txHash) { S[key].waiting = false; throw new Error('钱包没有发出交易（状态：' + (ex.status || '未知') + '），请重新预览'); }
+      for (let i = 0; i < (ex.pendingConfirmation ? 165 : 90); i++) {
         await sleep(2000);
         if (key === 'approve') { const now = await api('/api/token', { address: t.address }); if (BigInt(now.allowance) >= BigInt(p.amount)) { S.approve = { done: true }; break; } }
         else { const r = await api('/api/task/onchain', { taskId: p.task_id }); if (r.status === 1) {
           await api('/api/tasks', { taskId: p.task_id, token: t.address, symbol: t.symbol, decimals: t.decimals, recipient: p.recipient, amount: p.amount, minOut: p.minOut, costWei: p.costWei, mode: S.form.mode, gasPriceGwei: S.form.gwei, maxAttempts: Number(S.form.attempts) || 1, probe: S.form.mode === 'pre_armed_spray' && S.form.probeAddr ? { to: S.form.probeAddr, selector: S.form.probeSel, min: S.form.probeMin } : null });
           S.create = { done: true }; await refresh(false); break; } }
       }
-      if (!S[key].done) { S[key].waiting = false; toast('3 分钟内未在链上看到结果，请检查钱包后重新预览'); }
+      if (!S[key].done) { S[key] = { preview: S[key].preview }; toast(ex.pendingConfirmation ? '没有等到 App 确认。确认已过期的话，请重新预览后再发送' : '3 分钟内未在链上看到结果，请检查钱包后重新预览'); }
     }
     render();
   }).catch(() => render())));
@@ -378,7 +390,7 @@ V[4] = () => {
     let [label, cls] = STATE[s.state] || [s.state, '']; if (k.probe && s.state === 'ready') label = st.running ? `等待进度达到 ${Number(k.probe.min).toLocaleString('en-US')}` : '未启动'; const met = Object.fromEntries(s.metrics || []); const res = s.result ? JSON.parse(s.result) : null;
     let place = ''; if (res && 'block_delta' in met) place = met.same_block_after_launch ? '与开盘同块，排在开盘之后' : met.block_delta > 0 ? `开盘后第 ${met.block_delta} 个区块` : '区块位置待确认';
     return `<div class="card" style="margin-bottom:14px"><div class="row"><div class="grow"><h3>${esc(k.symbol)} <span class="badge ${cls}">${label}</span></h3>
-      <p>${k.mode === 'pre_armed_spray' ? '预埋同块' : '下一块卖出'}，卖出 <span class="num">${units(k.amount, k.decimals, 2)}</span>，最低到账 <span class="num">${units(k.minOut, 18, 6)}</span> BNB，已发送 ${s.attempts} 笔</p></div>
+      <p>${k.mode === 'pre_armed_spray' ? '预埋同块' : '下一块卖出'}，卖出 <span class="num">${units(k.amount, k.decimals, 2)}</span>，最低到账 <span class="num">${floorText(k.minOut)}</span>，已发送 ${s.attempts} 笔</p></div>
       <button class="btn danger" data-rm="${k.taskId}" ${st.running ? 'disabled' : ''}>移除</button></div>
       ${res ? `<div class="pad" style="border-top:1px solid var(--line)"><dl class="kv"><dt>实际到账</dt><dd class="num"><b>${units(res.received, 18, 6)} BNB</b>${BigInt(k.costWei) > 0n ? `（${(Number(BigInt(res.received) * 100n / BigInt(k.costWei)) / 100).toFixed(2)}× 成本）` : ''}</dd>
         <dt>成交位置</dt><dd>${place}</dd><dt>成交区块 / 序号</dt><dd class="num">${res.block} / ${res.tx_index}</dd><dt>Gas 花费</dt><dd class="num">${units(res.cost_wei, 18, 7)} BNB</dd><dt>交易</dt><dd class="num"><a href="https://bscscan.com/tx/${res.tx}" target="_blank" rel="noopener" style="color:var(--accent)">${short(res.tx)}</a></dd></dl></div>` : ''}</div>`;
